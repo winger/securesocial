@@ -34,10 +34,11 @@ import play.api.libs.json.Json
  */
 trait SecureSocial extends Controller {
 
-  /**
-   * A request that adds the User for the current call
-   */
-  case class SecuredRequest[A](user: SocialUser, request: Request[A]) extends WrappedRequest(request)
+  case class UserAwareCtx(maybeUser: Option[SocialUser])
+  
+  case class SecuredCtx(user: SocialUser) extends UserAwareCtx(Some(user))
+
+  def removeCredentials(session: Session) = session - SecureSocial.UserKey - SecureSocial.ProviderKey
 
   /**
    * A Forbidden response for API clients
@@ -46,85 +47,42 @@ trait SecureSocial extends Controller {
    * @return
    */
   private def apiClientForbidden[A](implicit request: Request[A]): Result = {
-    Forbidden(Json.toJson(Map("error"->"Credentials required"))).withSession {
-      session - SecureSocial.UserKey - SecureSocial.ProviderKey
+    Forbidden(Json.toJson(Map("error" -> "Credentials required"))).withSession {
+      removeCredentials(session)
     }.as(JSON)
   }
 
   /**
    * A secured action.  If there is no user in the session the request is redirected
    * to the login page
-   *
-   * @param apiClient A boolean specifying if this is request is for an API or not
-   * @param p
-   * @param f
-   * @tparam A
-   * @return
    */
-  def SecuredAction[A](apiClient: Boolean, p: BodyParser[A])(f: SecuredRequest[A] => Result) = Action(p) {
-    implicit request => {
-      SecureSocial.userFromSession(request).map { userId =>
-        UserService.find(userId).map { user =>
-          f(SecuredRequest(user, request))
-        }.getOrElse {
-          // there is no user in the backing store matching the credentials sent by the client.
-          // we need to remove the credentials from the session
+  trait SecuredRequestContext[A] extends RequestContext[A] {
+    def apiClient = false
+    
+    private lazy val userFromSession: Option[SocialUser] = SecureSocial.userFromSession(this).flatMap(UserService.find)
+    
+    implicit lazy val securedCtx = new SecuredCtx(userFromSession.get) 
+
+    override protected def stackedAction = super.stackedAction.orElse{ userFromSession match {
+        case Some(_) => None
+        case None => Some{
           if ( apiClient ) {
-            apiClientForbidden(request)
+            apiClientForbidden(this)
           } else {
-            Redirect(routes.LoginPage.logout())
+            if ( Logger.isDebugEnabled ) {
+              Logger.debug("Anonymous user trying to access : '%s'".format(this.uri))
+            }
+            Redirect(routes.LoginPage.login()).flashing("error" -> Messages("securesocial.loginRequired")).withSession(
+              removeCredentials(session + (SecureSocial.OriginalUrlKey -> this.uri))
+            )
           }
-        }
-      }.getOrElse {
-        if ( Logger.isDebugEnabled ) {
-          Logger.debug("Anonymous user trying to access : '%s'".format(request.uri))
-        }
-        if ( apiClient ) {
-          apiClientForbidden(request)
-        } else {
-          Redirect(routes.LoginPage.login()).flashing("error" -> Messages("securesocial.loginRequired")).withSession(
-            session + (SecureSocial.OriginalUrlKey -> request.uri)
-          )
         }
       }
     }
   }
 
-  /**
-   * A secured action.  If there is no user in the session the request is redirected
-   * to the login page.
-   * @param f
-   * @return
-   */
-  def SecuredAction(apiClient: Boolean = false)(f: SecuredRequest[AnyContent] => Result): Action[AnyContent] = {
-    SecuredAction(apiClient, parse.anyContent)(f)
-  }
-
-  /**
-   * A request that adds the User for the current call
-   */
-  case class RequestWithUser[A](user: Option[SocialUser], request: Request[A]) extends WrappedRequest(request)
-
-  /**
-   * An action that adds the current user in the request if it's available
-   *
-   * @param p
-   * @param f
-   * @tparam A
-   * @return
-   */
-  def UserAwareAction[A](p: BodyParser[A])(f: RequestWithUser[A] => Result) = Action(p) {
-    implicit request =>
-      f(RequestWithUser(SecureSocial.currentUser, request))
-  }
-
-  /**
-   * An action that adds the current user in the request if it's available
-   * @param f
-   * @return
-   */
-  def UserAwareAction(f: RequestWithUser[AnyContent] => Result): Action[AnyContent] = {
-    UserAwareAction(parse.anyContent)(f)
+  trait UserAwareRequestContext[A] extends RequestContext[A] {
+    implicit lazy val userAwareCtx = new UserAwareCtx(SecureSocial.userFromSession(this).flatMap(UserService.find))
   }
 }
 
