@@ -33,10 +33,9 @@ import play.api.libs.json.Json
  *    }
  */
 trait SecureSocial extends Controller {
-
   case class UserAwareCtx(maybeUser: Option[SocialUser])
   
-  case class SecuredCtx(user: SocialUser) extends UserAwareCtx(Some(user))
+  case class SecuredCtx(user: SocialUser)
 
   def removeCredentials(session: Session) = session - SecureSocial.UserKey - SecureSocial.ProviderKey
 
@@ -53,26 +52,41 @@ trait SecureSocial extends Controller {
   }
 
   /**
+   * Return the logout call.
+   * @return the logout call
+   */
+  protected def logoutCall = {
+    routes.LoginPage.logout()
+  }
+
+  /**
+   * Return the login call.
+   * @return the login call
+   */
+  protected def loginCall = {
+    routes.LoginPage.login()
+  }
+
+  /**
    * A secured action.  If there is no user in the session the request is redirected
    * to the login page
    */
-  trait SecuredRequestContext[A] extends RequestContext[A] {
+  trait SecuredRequestContext[A] extends RequestContext[A] with UserAwareRequestContext[A] {
     def apiClient = false
     
-    private lazy val userFromSession: Option[SocialUser] = SecureSocial.userFromSession(this).flatMap(UserService.find)
-    
-    implicit lazy val securedCtx = new SecuredCtx(userFromSession.get) 
+    implicit lazy val securedCtx = new SecuredCtx(userAwareCtx.maybeUser.get)
 
-    override protected def stackedAction = super.stackedAction.orElse{ userFromSession match {
+    override protected def stackedAction = super.stackedAction.orElse{
+      userAwareCtx.maybeUser match {
         case Some(_) => None
         case None => Some{
-          if ( apiClient ) {
+          if (apiClient) {
             apiClientForbidden(this)
           } else {
-            if ( Logger.isDebugEnabled ) {
+            if (Logger.isDebugEnabled) {
               Logger.debug("Anonymous user trying to access : '%s'".format(this.uri))
             }
-            Redirect(routes.LoginPage.login()).flashing("error" -> Messages("securesocial.loginRequired")).withSession(
+            Redirect(loginCall).flashing("error" -> Messages("securesocial.loginRequired")).withSession(
               removeCredentials(session + (SecureSocial.OriginalUrlKey -> this.uri))
             )
           }
@@ -131,7 +145,7 @@ object SecureSocial {
       ProviderRegistry.get(user.id.providerId).map { p =>
         val si = p.asInstanceOf[OAuth1Provider].serviceInfo
         val oauthInfo = user.oAuth1Info.get.copy(serviceInfo = si)
-        user.copy( oAuth1Info = Some(oauthInfo))
+        user.copy(oAuth1Info = Some(oauthInfo))
       }.get
     } else {
       user
