@@ -21,7 +21,7 @@ import securesocial.controllers.routes
 import play.api.i18n.Messages
 import play.api.Logger
 import play.api.libs.json.Json
-
+import models._
 
 /**
  * Provides the actions that can be used to protect controllers and retrieve the current user
@@ -33,9 +33,6 @@ import play.api.libs.json.Json
  *    }
  */
 trait SecureSocial extends Controller {
-  case class UserAwareCtx(maybeUser: Option[SocialUser])
-  
-  case class SecuredCtx(user: SocialUser)
 
   def removeCredentials(session: Session) = session - SecureSocial.UserKey - SecureSocial.ProviderKey
 
@@ -86,8 +83,8 @@ trait SecureSocial extends Controller {
             if (Logger.isDebugEnabled) {
               Logger.debug("Anonymous user trying to access : '%s'".format(this.uri))
             }
-            Redirect(loginCall).flashing("error" -> Messages("securesocial.loginRequired")).withSession(
-              removeCredentials(session + (SecureSocial.OriginalUrlKey -> this.uri))
+            Redirect(loginCall).flashing(SecureSocial.ErrorKey -> Messages("securesocial.loginRequired")).withSession(
+              removeCredentials(session) + (SecureSocial.OriginalUrlKey -> this.uri)
             )
           }
         }
@@ -104,6 +101,7 @@ object SecureSocial {
   val UserKey = "securesocial.user"
   val ProviderKey = "securesocial.provider"
   val OriginalUrlKey = "securesocial.originalUrl"
+  val ErrorKey = "securesocial.error"
 
   /**
    * Build a UserId object from the session data
