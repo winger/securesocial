@@ -20,7 +20,7 @@ import play.api.mvc.{Result, Action, Controller}
 import play.api.data._
 import play.api.data.Forms._
 import play.api.data.validation.Constraints._
-import play.api.{Play, Logger}
+import play.api.Play
 import securesocial.core.providers.UsernamePasswordProvider
 import securesocial.core.{AuthenticationMethod, UserService}
 import com.typesafe.plugin._
@@ -33,6 +33,7 @@ import securesocial.core.SocialUser
 import securesocial.core.providers.Token
 import scala.Some
 import securesocial.core.UserId
+import play.api.Logger
 
 
 /**

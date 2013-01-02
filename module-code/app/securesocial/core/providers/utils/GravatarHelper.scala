@@ -23,6 +23,7 @@ import scala.concurrent._
 import scala.util.{Try, Success, Failure}
 import scala.concurrent.duration._
 import play.api.libs.ws.Response
+import play.Logger
 
 object GravatarHelper {
   val GravatarUrl = "http://www.gravatar.com/avatar/%s?d=404"

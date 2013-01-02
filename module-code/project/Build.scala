@@ -5,11 +5,11 @@ import play.Project._
 object ApplicationBuild extends Build {
 
     val appName         = "securesocial"
-    val appVersion      = "master"
+    val appVersion      = "2.1-RC1"
 
     val appDependencies = Seq(
-      "com.typesafe" %% "play-plugins-util" % "2.1-SNAPSHOT",
-      "com.typesafe" %% "play-plugins-mailer" % "2.1-SNAPSHOT",
+      "com.typesafe" %% "play-plugins-util" % "2.1-RC1",
+      "com.typesafe" %% "play-plugins-mailer" % "2.1-RC1",
       "org.mindrot" % "jbcrypt" % "0.3m"
     )
 
