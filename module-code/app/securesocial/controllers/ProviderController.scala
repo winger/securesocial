@@ -57,6 +57,18 @@ object ProviderController extends Controller
     )
   )
 
+
+  /**
+   * Renders a not authorized page if the Authorization object passed to the action does not allow
+   * execution.
+   *
+   * @see Authorization
+   */
+  def notAuthorized() = Action { implicit request =>
+    import com.typesafe.plugin._
+    Forbidden(use[TemplatesPlugin].getNotAuthorizedPage)
+  }
+
   /**
    * The authentication flow for all providers starts here.
    *
@@ -67,16 +79,17 @@ object ProviderController extends Controller
   def authenticateByPost(provider: String) = handleAuth(provider)
 
   private def handleAuth(provider: String) = Action { implicit request =>
-    ProviderRegistry.get(provider) match {
+    Registry.providers.get(provider) match {
       case Some(p) => {
         try {
           p.authenticate().fold( result => result , {
             user =>
               if ( Logger.isDebugEnabled ) {
-                Logger.debug("User logged in : [" + user + "]")
+                Logger.debug("[securesocial] user logged in : [" + user + "]")
               }
               Redirect(toUrl).withSession { session +
                 (SecureSocial.UserKey -> user.id.id) +
+                SecureSocial.lastAccess +
                 (SecureSocial.ProviderKey -> user.id.providerId) -
                 SecureSocial.OriginalUrlKey
               }
@@ -84,6 +97,11 @@ object ProviderController extends Controller
         } catch {
           case ex: AccessDeniedException => {
             Redirect(RoutesHelper.login()).flashing("error" -> Messages("securesocial.login.accessDenied"))
+          }
+
+          case other: Throwable => {
+            Logger.error("Unable to log user in. An exception was thrown", other)
+            Redirect(RoutesHelper.login()).flashing("error" -> Messages("securesocial.login.errorLoggingIn"))
           }
         }
       }

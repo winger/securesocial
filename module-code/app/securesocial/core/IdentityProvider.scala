@@ -26,8 +26,8 @@ import play.api.{Play, Application, Logger, Plugin}
  *
  *
  */
-abstract class IdentityProvider(application: Application) extends Plugin {
-  val SecureSocial = "securesocial."
+abstract class IdentityProvider(application: Application) extends Plugin with Registrable {
+  val SecureSocialKey = "securesocial."
   val Dot = "."
 
 
@@ -35,21 +35,17 @@ abstract class IdentityProvider(application: Application) extends Plugin {
    * Registers the provider in the Provider Registry
    */
   override def onStart() {
-    ProviderRegistry.register(this)
+    Logger.info("[securesocial] loaded identity provider: %s".format(id))
+    Registry.providers.register(this)
   }
 
   /**
    * Unregisters the provider
    */
   override def onStop() {
-    ProviderRegistry.unRegister(providerId)
+    Logger.info("[securesocial] unloaded identity provider: %s".format(id))
+    Registry.providers.unRegister(id)
   }
-
-  /**
-   * Subclasses need to implement this to specify the provider type
-   * @return
-   */
-  def providerId: String
 
   /**
    * Subclasses need to implement this to specify the authentication method
@@ -62,7 +58,7 @@ abstract class IdentityProvider(application: Application) extends Plugin {
    *
    * @return
    */
-  override def toString = providerId
+  override def toString = id
 
   /**
    * Authenticates the user and fills the profile information. Returns either a User if all went
@@ -73,12 +69,19 @@ abstract class IdentityProvider(application: Application) extends Plugin {
    * @tparam A
    * @return
    */
-  def authenticate[A]()(implicit request: Request[A]):Either[Result, SocialUser] = {
+  def authenticate[A]()(implicit request: Request[A]):Either[Result, Identity] = {
     doAuth().fold(
       result => Left(result),
       u =>
       {
-        val user = fillProfile(u)
+        val user = try {
+          fillProfile(u)
+        } catch {
+          case ex: Throwable => {
+            Logger.error("[securesocial] failed to fetch user info from provider " + id, ex)
+            throw new AuthenticationException()
+          }
+        }
         UserService.save(user)
         Right(user)
       }
@@ -90,14 +93,14 @@ abstract class IdentityProvider(application: Application) extends Plugin {
    * to the provider url.
    * @return
    */
-  def authenticationUrl:String = RoutesHelper.authenticate(providerId).url
+  def authenticationUrl:String = RoutesHelper.authenticate(id).url
 
   /**
    * The property key used for all the provider properties.
    *
    * @return
    */
-  def propertyKey = SecureSocial + providerId + Dot
+  def propertyKey = SecureSocialKey + id + Dot
 
   /**
    * Reads a property from the application.conf
@@ -107,7 +110,7 @@ abstract class IdentityProvider(application: Application) extends Plugin {
   def loadProperty(property: String): Option[String] = {
     val result = application.configuration.getString(propertyKey + property)
     if ( !result.isDefined ) {
-      Logger.error("[securesocial] Missing property " + property + " for provider " + providerId)
+      Logger.error("[securesocial] Missing property " + property + " for provider " + id)
     }
     result
   }
@@ -130,10 +133,10 @@ abstract class IdentityProvider(application: Application) extends Plugin {
    * @param user The user object to be populated
    * @return A copy of the user object with the new values set
    */
-  def fillProfile(user: SocialUser):SocialUser
+  def fillProfile(user: SocialUser): SocialUser
 
   protected def throwMissingPropertiesException() {
-    val msg = "Missing properties for provider '%s'. Verify your configuration file is properly set.".format(providerId)
+    val msg = "Missing properties for provider '%s'. Verify your configuration file is properly set.".format(id)
     Logger.error(msg)
     throw new RuntimeException(msg)
   }

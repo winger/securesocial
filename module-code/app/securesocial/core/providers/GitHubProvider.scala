@@ -18,16 +18,15 @@ package securesocial.core.providers
 
 import securesocial.core._
 import play.api.{Logger, Application}
-import play.api.libs.ws.{Response, WS}
+import play.api.libs.ws.WS
+import play.api.libs.concurrent.Execution.Implicits._
 import securesocial.core.UserId
 import securesocial.core.SocialUser
 import play.api.libs.ws.Response
 import securesocial.core.AuthenticationException
 import scala.Some
-import play.api.libs.concurrent.Execution.Implicits._
 import scala.concurrent._
 import scala.concurrent.duration._
-import scala.util.{Try, Success, Failure}
 
 /**
  * A GitHub provider
@@ -43,13 +42,13 @@ class GitHubProvider(application: Application) extends OAuth2Provider(applicatio
   val AvatarUrl = "avatar_url"
   val Email = "email"
 
-  def providerId = GitHubProvider.GitHub
+  override def id = GitHubProvider.GitHub
 
   override protected def buildInfo(response: Response): OAuth2Info = {
     response.body.split("&|=") match {
       case Array(AccessToken, token, TokenType, tokenType) => OAuth2Info(token, Some(tokenType), None)
       case _ =>
-        Logger.error("Invalid response format for accessToken")
+        Logger.error("[securesocial] invalid response format for accessToken")
         throw new AuthenticationException()
     }
   }
@@ -62,39 +61,28 @@ class GitHubProvider(application: Application) extends OAuth2Provider(applicatio
    * @return A copy of the user object with the new values set
    */
   def fillProfile(user: SocialUser): SocialUser = {
-    val accessToken = user.oAuth2Info.get.accessToken
-    val f = WS.url(GetAuthenticatedUser.format(user.oAuth2Info.get.accessToken)).get()
-    val p = promise[SocialUser]
-    f.onComplete {
-      case Success(response) => p.success {
-
-        val me = response.json
-        (me \ Message).asOpt[String] match {
-          case Some(msg) => {
-            Logger.error("Error retrieving profile information from GitHub. Message = %s".format(msg))
-            throw new AuthenticationException()
-          }
-          case _ => {
-            val id = (me \ Id).as[Int]
-            val displayName = (me \ Name).asOpt[String].getOrElse("")
-            val avatarUrl = (me \ AvatarUrl).asOpt[String]
-            val email = (me \ Email).asOpt[String].filter(!_.isEmpty)
-            user.copy(
-              id = UserId(id.toString, providerId),
-              fullName = displayName,
-              avatarUrl = avatarUrl,
-              email = email)
-          }
+    val f = WS.url(GetAuthenticatedUser.format(user.oAuth2Info.get.accessToken)).get().map { response =>
+      val me = response.json
+      (me \ Message).asOpt[String] match {
+        case Some(msg) => {
+          Logger.error("[securesocial] error retrieving profile information from GitHub. Message = %s".format(msg))
+          throw new AuthenticationException()
         }
-
-      }
-      case Failure(t) => {
-        Logger.error("Error retrieving profile information from github", t)
-        throw new AuthenticationException()
+        case _ => {
+          val userId = (me \ Id).as[Int]
+          val displayName = (me \ Name).asOpt[String].getOrElse("")
+          val avatarUrl = (me \ AvatarUrl).asOpt[String]
+          val email = (me \ Email).asOpt[String].filter(!_.isEmpty)
+          user.copy(
+            id = UserId(userId.toString, id),
+            fullName = displayName,
+            avatarUrl = avatarUrl,
+            email = email)
+        }
       }
     }
 
-    Await.result(p.future, 10 seconds)
+    Await.result(f, 10 seconds)
   }
 }
 

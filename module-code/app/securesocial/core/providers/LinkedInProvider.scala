@@ -24,7 +24,6 @@ import LinkedInProvider._
 import play.api.libs.concurrent.Execution.Implicits._
 import scala.concurrent._
 import scala.concurrent.duration._
-import scala.util.{Try, Success, Failure}
 
 
 /**
@@ -33,50 +32,41 @@ import scala.util.{Try, Success, Failure}
 class LinkedInProvider(application: Application) extends OAuth1Provider(application) {
 
 
-  override def providerId = LinkedInProvider.LinkedIn
+  override def id = LinkedInProvider.LinkedIn
 
   override def fillProfile(user: SocialUser): SocialUser = {
     val oauthInfo = user.oAuth1Info.get
-
-    val f = WS.url(LinkedInProvider.Api).sign(OAuthCalculator(oauthInfo.serviceInfo.key,
-      RequestToken(oauthInfo.token, oauthInfo.secret))).get()
-    val p = promise[SocialUser]
-    f.onComplete {
-      case Success(response) => p.success {
-        val me = response.json
-        (me \ ErrorCode).asOpt[Int] match {
-          case Some(error) => {
-            val message = (me \ Message).asOpt[String]
-            val requestId = (me \ RequestId).asOpt[String]
-            val timestamp = (me \ Timestamp).asOpt[String]
-            Logger.error(
-              "Error retrieving information from LinkedIn. Error code: %s, requestId: %s, message: %s, timestamp: %s"
-                format (error, message, requestId, timestamp))
-            throw new AuthenticationException()
-          }
-          case _ => {
-            val id = (me \ Id).as[String]
-            val firstName = (me \ FirstName).asOpt[String].getOrElse("")
-            val lastName = (me \ LastName).asOpt[String].getOrElse("")
-            val fullName = (me \ FormattedName).asOpt[String].getOrElse("")
-            val avatarUrl = (me \ PictureUrl).asOpt[String]
-
-            user.copy(
-              id = UserId(id, providerId),
-              firstName = firstName,
-              lastName = lastName,
-              fullName = fullName,
-              avatarUrl = avatarUrl)
-          }
+    val f = WS.url(LinkedInProvider.Api).sign(OAuthCalculator(SecureSocial.serviceInfoFor(user).get.key,
+      RequestToken(oauthInfo.token, oauthInfo.secret))).get().map { response =>
+      val me = response.json
+      (me \ ErrorCode).asOpt[Int] match {
+        case Some(error) => {
+          val message = (me \ Message).asOpt[String]
+          val requestId = (me \ RequestId).asOpt[String]
+          val timestamp = (me \ Timestamp).asOpt[String]
+          Logger.error(
+            "Error retrieving information from LinkedIn. Error code: %s, requestId: %s, message: %s, timestamp: %s"
+              format (error, message, requestId, timestamp))
+          throw new AuthenticationException()
         }
-      }
-      case Failure(t) => {
-        Logger.error("timed out waiting for LinkedIn")
-        throw new AuthenticationException()
+        case _ => {
+          val userId = (me \ Id).as[String]
+          val firstName = (me \ FirstName).asOpt[String].getOrElse("")
+          val lastName = (me \ LastName).asOpt[String].getOrElse("")
+          val fullName = (me \ FormattedName).asOpt[String].getOrElse("")
+          val avatarUrl = (me \ PictureUrl).asOpt[String]
+
+          SocialUser(user).copy(
+            id = UserId(userId, id),
+            firstName = firstName,
+            lastName = lastName,
+            fullName = fullName,
+            avatarUrl = avatarUrl)
+        }
       }
     }
 
-    Await.result(p.future, 10 seconds)
+    Await.result(f, 10 seconds)
   }
 }
 
@@ -90,7 +80,7 @@ object LinkedInProvider {
   val Id = "id"
   val FirstName = "firstName"
   val LastName = "lastName"
-  val FormattedName = "formatted-name"
+  val FormattedName = "formattedName"
   val PictureUrl = "pictureUrl"
 
 }

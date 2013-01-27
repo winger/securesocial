@@ -19,6 +19,8 @@ package securesocial.core.java;
 import play.Application;
 import play.libs.Scala;
 import scala.Option;
+import securesocial.core.Identity;
+import securesocial.core.UserId;
 
 import java.lang.reflect.Field;
 
@@ -48,26 +50,19 @@ public abstract class BaseUserService extends securesocial.core.UserServicePlugi
     }
 
     /**
-     * Finds a SocialUser that maches the specified id
+     * Finds an Identity that maches the specified id
      *
      * @param id the user id
      * @return an optional user
      */
     @Override
-    public Option<securesocial.core.SocialUser> find(securesocial.core.UserId id) {
-        UserId javaId = new UserId();
-        javaId.id = id.id();
-        javaId.provider = id.providerId();
-        SocialUser javaUser = doFind(javaId);
-        securesocial.core.SocialUser scalaUser = null;
-        if ( javaUser != null ) {
-            scalaUser = javaUser.toScala();
-        }
-        return Scala.Option(scalaUser);
+    public Option<securesocial.core.Identity> find(securesocial.core.UserId id) {
+        Identity identity = doFind(id);
+        return Scala.Option(identity);
     }
 
     /**
-     * Finds a Social user by email and provider id.
+     * Finds an Identity by email and provider id.
      *
      * Note: If you do not plan to use the UsernamePassword provider just provide en empty
      * implementation.
@@ -77,20 +72,20 @@ public abstract class BaseUserService extends securesocial.core.UserServicePlugi
      * @return
      */
     @Override
-    public Option<securesocial.core.SocialUser> findByEmailAndProvider(String email, String providerId) {
-        SocialUser javaUser = doFindByEmailAndProvider(email, providerId);
-        securesocial.core.SocialUser scalaUser = javaUser != null ? javaUser.toScala() : null;
-        return Scala.Option(scalaUser);
+    public Option<securesocial.core.Identity> findByEmailAndProvider(String email, String providerId) {
+        Identity identity = doFindByEmailAndProvider(email, providerId);
+        return Scala.Option(identity);
     }
 
     /**
-     * Saves the user.  This method gets called when a user logs in.
+     * Saves the Identity.  This method gets called when a user logs in.
      * This is your chance to save the user information in your backing store.
+     *
      * @param user
      */
     @Override
-    public void save(securesocial.core.SocialUser user) {
-        doSave(SocialUser.fromScala(user));
+    public void save(securesocial.core.Identity user) {
+        doSave(user);
     }
 
     /**
@@ -150,14 +145,18 @@ public abstract class BaseUserService extends securesocial.core.UserServicePlugi
     }
 
     /**
-     * Saves the user.  This method gets called when a user logs in.
+     * Saves the Identity.  This method gets called when a user logs in.
      * This is your chance to save the user information in your backing store.
+     *
      * @param user
      */
-    public abstract void doSave(SocialUser user);
+    public abstract void doSave(Identity user);
 
     /**
      * Saves a token
+     *
+     * Note: If you do not plan to use the UsernamePassword provider just provide en empty
+     * implementation
      *
      * @param token
      */
@@ -165,8 +164,9 @@ public abstract class BaseUserService extends securesocial.core.UserServicePlugi
 
     /**
      * Finds the user in the backing store.
+     * @return an Identity instance or null if no user matches the specified id
      */
-    public abstract SocialUser doFind(UserId userId);
+    public abstract Identity doFind(UserId userId);
 
     /**
      * Finds a token
@@ -175,22 +175,22 @@ public abstract class BaseUserService extends securesocial.core.UserServicePlugi
      * implementation
      *
      * @param tokenId the token id
-     * @return
+     * @return a Token instance or null if no token matches the specified id
      */
     public abstract Token doFindToken(String tokenId);
 
 
     /**
-     * Finds a Social user by email and provider id.
+     * Finds an identity by email and provider id.
      *
      * Note: If you do not plan to use the UsernamePassword provider just provide en empty
      * implementation.
      *
      * @param email - the user email
      * @param providerId - the provider id
-     * @return
+     * @return an Identity instance or null if no user matches the specified id
      */
-    public abstract SocialUser doFindByEmailAndProvider(String email, String providerId);
+    public abstract Identity doFindByEmailAndProvider(String email, String providerId);
 
     /**
      * Deletes a token

@@ -20,7 +20,7 @@ import play.api.data.Form
 import play.api.data.Forms._
 import securesocial.core._
 import play.api.mvc.{PlainResult, Results, Result, Request}
-import utils.PasswordHasher
+import utils.{GravatarHelper, PasswordHasher}
 import play.api.{Play, Application}
 import Play.current
 import com.typesafe.plugin._
@@ -32,7 +32,7 @@ import org.joda.time.DateTime
  */
 class UsernamePasswordProvider(application: Application) extends IdentityProvider(application) {
 
-  def providerId = UsernamePasswordProvider.UsernamePassword
+  override def id = UsernamePasswordProvider.UsernamePassword
 
   def authMethod = AuthenticationMethod.UserPassword
 
@@ -43,13 +43,17 @@ class UsernamePasswordProvider(application: Application) extends IdentityProvide
     form.fold(
       errors => Left(badRequest(errors, request)),
       credentials => {
-        val userId = UserId(credentials._1, providerId)
-        UserService.find(userId) match {
-          case Some(user) if user.passwordInfo.isDefined &&
-            use[PasswordHasher].matches(user.passwordInfo.get, credentials._2) =>
-              Right(user)
-          case _ => Left(badRequest(UsernamePasswordProvider.loginForm, request, Some(InvalidCredentials)))
-        }
+        val userId = UserId(credentials._1, id)
+        val result = for (
+          user <- UserService.find(userId) ;
+          pinfo <- user.passwordInfo ;
+          hasher <- Registry.hashers.get(pinfo.hasher) if hasher.matches(pinfo, credentials._2)
+        ) yield (
+          Right(SocialUser(user))
+        )
+        result.getOrElse(
+          Left(badRequest(UsernamePasswordProvider.loginForm, request, Some(InvalidCredentials)))
+        )
       }
     )
   }
@@ -59,17 +63,20 @@ class UsernamePasswordProvider(application: Application) extends IdentityProvide
   }
 
   def fillProfile(user: SocialUser) = {
-    // nothing to do for this provider, the user should already have everything because it
-    // was loaded from the backing store
-    user
+    GravatarHelper.avatarFor(user.email.get) match {
+      case Some(url) if url != user.avatarUrl => user.copy( avatarUrl = Some(url))
+      case _ => user
+    }
   }
 }
 
 object UsernamePasswordProvider {
   val UsernamePassword = "userpass"
-  private val key = "securesocial.userpass.withUserNameSupport"
-  private val sendWelcomeEmailKey = "securesocial.userpass.sendWelcomeEmail"
-  private val enableGravatarKey = "securesocial.userpass.enableGravatarSupport"
+  private val Key = "securesocial.userpass.withUserNameSupport"
+  private val SendWelcomeEmailKey = "securesocial.userpass.sendWelcomeEmail"
+  private val EnableGravatarKey = "securesocial.userpass.enableGravatarSupport"
+  private val Hasher = "securesocial.userpass.hasher"
+  private val EnableTokenJob = "securesocial.userpass.enableTokenJob"
 
   val loginForm = Form(
     tuple(
@@ -78,9 +85,11 @@ object UsernamePasswordProvider {
     )
   )
 
-  val withUserNameSupport = current.configuration.getBoolean(key).getOrElse(false)
-  val sendWelcomeEmail = current.configuration.getBoolean(sendWelcomeEmailKey).getOrElse(true)
-  val enableGravatar = current.configuration.getBoolean(enableGravatarKey).getOrElse(true)
+  lazy val withUserNameSupport = current.configuration.getBoolean(Key).getOrElse(false)
+  lazy val sendWelcomeEmail = current.configuration.getBoolean(SendWelcomeEmailKey).getOrElse(true)
+  lazy val enableGravatar = current.configuration.getBoolean(EnableGravatarKey).getOrElse(true)
+  lazy val hasher = current.configuration.getString(Hasher).getOrElse(PasswordHasher.BCryptHasher)
+  lazy val enableTokenJob = current.configuration.getBoolean(EnableTokenJob).getOrElse(true)
 }
 
 /**

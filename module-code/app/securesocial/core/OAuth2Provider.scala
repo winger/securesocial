@@ -24,7 +24,6 @@ import Play.current
 import play.api.mvc.{Results, Result, Request}
 import providers.utils.RoutesHelper
 import play.api.libs.ws.{Response, WS}
-import scala.util.{Try, Success, Failure}
 import play.api.libs.concurrent.Execution.Implicits._
 import scala.concurrent._
 import scala.concurrent.duration._
@@ -53,33 +52,22 @@ abstract class OAuth2Provider(application: Application) extends IdentityProvider
     result.get
   }
 
-  private def getAccessToken[A](code: String)(implicit request: Request[A]):OAuth2Info = {
+  private def getAccessToken[A](code: String)(implicit request: Request[A]): OAuth2Info = {
     val params = Map(
       OAuth2Constants.ClientId -> Seq(settings.clientId),
       OAuth2Constants.ClientSecret -> Seq(settings.clientSecret),
       OAuth2Constants.GrantType -> Seq(OAuth2Constants.AuthorizationCode),
       OAuth2Constants.Code -> Seq(code),
-      OAuth2Constants.RedirectUri -> Seq(RoutesHelper.authenticate(providerId).absoluteURL(IdentityProvider.sslEnabled))
+      OAuth2Constants.RedirectUri -> Seq(RoutesHelper.authenticate(id).absoluteURL(IdentityProvider.sslEnabled))
     )
-    
-  val f = WS.url(settings.accessTokenUrl).post(params)
-  val p = promise[OAuth2Info]
-  f.onComplete{
-  	case Success(response) => p.success(buildInfo(response))
-  	case Failure(t)  => {
-  	  Logger.error("Timed out trying to get an access token for provider " + providerId)
-	  	  throw new AuthenticationException()
-	  	}
-    }
-   
-    Await.result(p.future, 10 seconds)
-  
+
+    Await.result(WS.url(settings.accessTokenUrl).post(params).map(buildInfo), 10 seconds)
   }
 
   protected def buildInfo(response: Response): OAuth2Info = {
       val json = response.json
       if ( Logger.isDebugEnabled ) {
-        Logger.debug("Got json back [" + json + "]")
+        Logger.debug("[securesocial] got json back [" + json + "]")
       }
       OAuth2Info(
         (json \ OAuth2Constants.AccessToken).as[String],
@@ -94,7 +82,7 @@ abstract class OAuth2Provider(application: Application) extends IdentityProvider
       error match {
         case OAuth2Constants.AccessDenied => throw new AccessDeniedException()
         case _ =>
-          Logger.error("Error '" + error + "' returned by the authorization server. Provider type is " + providerId)
+          Logger.error("[securesocial] error '%s' returned by the authorization server. Provider type is %s".format(error, id))
           throw new AuthenticationException()
       }
       throw new AuthenticationException()
@@ -106,6 +94,7 @@ abstract class OAuth2Provider(application: Application) extends IdentityProvider
         val user = for (
           // check if the state we sent is equal to the one we're receiving now before continuing the flow.
           sessionId <- request.session.get(IdentityProvider.SessionId) ;
+          // todo: review this -> clustered environments
           originalState <- Cache.getAs[String](sessionId) ;
           currentState <- request.queryString.get(OAuth2Constants.State).flatMap(_.headOption) if originalState == currentState
         ) yield {
@@ -113,10 +102,10 @@ abstract class OAuth2Provider(application: Application) extends IdentityProvider
           val oauth2Info = Some(
             OAuth2Info(accessToken.accessToken, accessToken.tokenType, accessToken.expiresIn, accessToken.refreshToken)
           )
-          SocialUser(UserId("", providerId), "", "", "", None, None, authMethod, oAuth2Info = oauth2Info)
+          SocialUser(UserId("", id), "", "", "", None, None, authMethod, oAuth2Info = oauth2Info)
         }
         if ( Logger.isDebugEnabled ) {
-          Logger.debug("user = " + user)
+          Logger.debug("[securesocial] user = " + user)
         }
         user match  {
           case Some(u) => Right(u)
@@ -129,7 +118,7 @@ abstract class OAuth2Provider(application: Application) extends IdentityProvider
         Cache.set(sessionId, state)
         var params = List(
           (OAuth2Constants.ClientId, settings.clientId),
-          (OAuth2Constants.RedirectUri, RoutesHelper.authenticate(providerId).absoluteURL(IdentityProvider.sslEnabled)),
+          (OAuth2Constants.RedirectUri, RoutesHelper.authenticate(id).absoluteURL(IdentityProvider.sslEnabled)),
           (OAuth2Constants.ResponseType, OAuth2Constants.Code),
           (OAuth2Constants.State, state))
         settings.scope.foreach( s => { params = (OAuth2Constants.Scope, s) :: params })

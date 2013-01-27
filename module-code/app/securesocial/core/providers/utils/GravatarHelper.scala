@@ -20,26 +20,30 @@ import java.security.MessageDigest
 import play.api.libs.ws.WS
 import play.api.libs.concurrent.Execution.Implicits._
 import scala.concurrent._
-import scala.util.{Try, Success, Failure}
+import scala.util.Success
 import scala.concurrent.duration._
 import play.api.libs.ws.Response
-import play.Logger
+import securesocial.core.providers.UsernamePasswordProvider
 
 object GravatarHelper {
   val GravatarUrl = "http://www.gravatar.com/avatar/%s?d=404"
   val Md5 = "MD5"
 
   def avatarFor(email: String): Option[String] = {
-    hash(email).map(hash => {
-      val url = GravatarUrl.format(hash)
-      val f: Future[Response] = WS.url(url).get()
-      val p = promise[Option[String]]
-      f.onComplete {
-        case Success(response) if (response.status == 200) => p.success(Some(url))
-        case _ => p.success(None)
-      }
-      Await.result(p.future, 10 seconds)
-    }).getOrElse(None)
+    if ( UsernamePasswordProvider.enableGravatar ) {
+      hash(email).map(hash => {
+        val url = GravatarUrl.format(hash)
+        val f: Future[Response] = WS.url(url).get()
+        val p = promise[Option[String]]
+        f.onComplete {
+          case Success(response) if (response.status == 200) => p.success(Some(url))
+          case _ => p.success(None)
+        }
+        Await.result(p.future, 10 seconds)
+      }).getOrElse(None)
+    } else {
+      None
+    }
   }
 
   private def hash(email: String): Option[String] = {

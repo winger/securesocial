@@ -16,20 +16,19 @@
  */
 package securesocial.controllers
 
+import _root_.java.util.UUID
 import play.api.mvc.{Result, Action, Controller}
 import play.api.data._
 import play.api.data.Forms._
 import play.api.data.validation.Constraints._
 import play.api.Play
 import securesocial.core.providers.UsernamePasswordProvider
-import securesocial.core.{AuthenticationMethod, UserService}
+import securesocial.core._
 import com.typesafe.plugin._
 import Play.current
 import securesocial.core.providers.utils._
 import org.joda.time.DateTime
-import java.util.UUID
 import play.api.i18n.Messages
-import securesocial.core.SocialUser
 import securesocial.core.providers.Token
 import scala.Some
 import securesocial.core.UserId
@@ -117,7 +116,9 @@ object Registration extends Controller {
   val changePasswordForm = Form (
     Password ->
       tuple(
-        Password1 -> nonEmptyText,
+        Password1 -> nonEmptyText.verifying( use[PasswordValidator].errorMessage,
+          p => use[PasswordValidator].isValid(p)
+        ),
         Password2 -> nonEmptyText
       ).verifying(Messages(PasswordsDoNotMatch), passwords => passwords._1 == passwords._2)
   )
@@ -171,7 +172,7 @@ object Registration extends Controller {
    */
   def signUp(token: String) = Action { implicit request =>
     if ( Logger.isDebugEnabled ) {
-      Logger.debug("trying sign up with token %s".format(token))
+      Logger.debug("[securesocial] trying sign up with token %s".format(token))
     }
     executeForToken(token, true, { _ =>
       Ok(use[TemplatesPlugin].getSignUpPage(request, form, token))
@@ -183,8 +184,10 @@ object Registration extends Controller {
       case Some(t) if !t.isExpired && t.isSignUp == isSignUp => {
         f(t)
       }
-      case _ =>
-        Redirect(RoutesHelper.startSignUp()).flashing(Error -> InvalidLink)
+      case _ => {
+        val to = if ( isSignUp ) RoutesHelper.startSignUp() else RoutesHelper.startResetPassword()
+        Redirect(to).flashing(Error -> InvalidLink)
+      }
     }
   }
 
@@ -196,7 +199,7 @@ object Registration extends Controller {
       form.bindFromRequest.fold (
         errors => {
           if ( Logger.isDebugEnabled ) {
-            Logger.debug("errors " + errors)
+            Logger.debug("[securesocial] errors " + errors)
           }
           BadRequest(use[TemplatesPlugin].getSignUpPage(request, errors, t.uuid))
         },
@@ -209,9 +212,9 @@ object Registration extends Controller {
             info.lastName,
             "%s %s".format(info.firstName, info.lastName),
             Some(t.email),
-            if ( UsernamePasswordProvider.enableGravatar ) GravatarHelper.avatarFor(t.email) else None,
+            GravatarHelper.avatarFor(t.email),
             AuthenticationMethod.UserPassword,
-            passwordInfo = Some(use[PasswordHasher].hash(info.password))
+            passwordInfo = Some(Registry.hashers.currentHasher.hash(info.password))
           )
           UserService.save(user)
           UserService.deleteToken(t.uuid)
@@ -262,15 +265,15 @@ object Registration extends Controller {
       p => {
         val toFlash = UserService.findByEmailAndProvider(t.email, UsernamePasswordProvider.UsernamePassword) match {
           case Some(user) => {
-            val hashed = use[PasswordHasher].hash(p._1)
-            val updated = user.copy( passwordInfo = Some(hashed) )
+            val hashed = Registry.hashers.currentHasher.hash(p._1)
+            val updated = SocialUser(user).copy( passwordInfo = Some(hashed) )
             UserService.save(updated)
             UserService.deleteToken(token)
             Mailer.sendPasswordChangedNotice(updated)
             (Success -> Messages(PasswordUpdated))
           }
           case _ => {
-            Logger.error("Count not find user with email %s during password reset".format(t.email))
+            Logger.error("[securesocial] could not find user with email %s during password reset".format(t.email))
             (Error -> Messages(ErrorUpdatingPassword))
           }
         }
